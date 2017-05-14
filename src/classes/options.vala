@@ -104,7 +104,13 @@ namespace pdfpc {
          * Commandline option providing the maximum height of the next slide
          * in the presenter window
          **/
-        public static uint next_height = 70;
+        public static uint next_height = 48;
+
+        /**
+         * Commandline option providing the maximum height of the final slide
+         * in the presenter window
+         **/
+        public static uint final_height = 48;
 
         /**
          * Minimum width for the overview miniatures

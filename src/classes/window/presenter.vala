@@ -60,6 +60,11 @@ namespace pdfpc.Window {
         protected View.Pdf next_view;
 
         /**
+         * View showing the final version of the current user slide
+         */
+        protected View.Pdf final_view;
+
+        /**
          * Timer for the presenation
          */
         protected TimerLabel? timer;
@@ -171,10 +176,20 @@ namespace pdfpc.Window {
             this.future_allocated_width = future_allocated_width;
             // We leave a bit of margin between the two views
             Gdk.Rectangle next_scale_rect;
+
+            uint next_height  = Options.next_height;
+            uint final_height = Options.final_height;
+            uint total_height = next_height + final_height;
+
+            if (total_height > 100) {
+                next_height  /= total_height;
+                final_height /= total_height;
+            };
+
             this.next_view = new View.Pdf.from_metadata(
                 metadata,
                 future_allocated_width,
-                (int) Math.floor(Options.next_height * bottom_position / (double)100 ),
+                (int) Math.floor(next_height * bottom_position / (double) 100),
                 Metadata.Area.CONTENT,
                 true,
                 false,
@@ -182,6 +197,19 @@ namespace pdfpc.Window {
                 this.gdk_scale,
                 out next_scale_rect
             );
+
+            this.final_view = new View.Pdf.from_metadata(
+                metadata,
+                future_allocated_width,
+                (int) Math.floor(final_height * bottom_position / (double) 100),
+                Metadata.Area.CONTENT,
+                true,
+                false,
+                this.presentation_controller,
+                this.gdk_scale,
+                out next_scale_rect
+            );
+
 
             // The countdown timer is centered in the 90% bottom part of the screen
             this.timer = this.presentation_controller.getTimer();
@@ -262,6 +290,7 @@ namespace pdfpc.Window {
             if (!Options.disable_caching) {
                 this.current_view.get_renderer().cache = Renderer.Cache.create(metadata);
                 this.next_view.get_renderer().cache = Renderer.Cache.create(metadata);
+                this.final_view.get_renderer().cache = Renderer.Cache.create(metadata);
             }
 
             Gtk.Box slide_views = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 4);
@@ -275,9 +304,15 @@ namespace pdfpc.Window {
 
             var futureViews = new Gtk.Box(Gtk.Orientation.VERTICAL, 0);
             futureViews.set_size_request(this.future_allocated_width, -1);
+
             this.next_view.halign = Gtk.Align.CENTER;
-            this.next_view.valign = Gtk.Align.CENTER;
-            futureViews.pack_start(next_view, false, false, 0);
+            this.next_view.valign = Gtk.Align.START;
+            futureViews.pack_start(next_view, true, false, 0);
+
+            this.final_view.halign = Gtk.Align.CENTER;
+            this.final_view.valign = Gtk.Align.END;
+            futureViews.pack_start(final_view, true, false, 0);
+
             slide_views.pack_start(futureViews, true, true, 0);
 
             this.slide_stack = new Gtk.Stack();
@@ -377,6 +412,13 @@ namespace pdfpc.Window {
                 this.current_view.display(current_slide_number);
                 this.next_view.display(this.metadata.user_slide_to_real_slide(
                     current_user_slide_number + 1));
+                if (this.presentation_controller.skip_next()) {
+                    this.final_view.display(
+                        this.metadata.user_slide_to_real_slide(
+                            current_user_slide_number));
+                } else {
+                    this.final_view.fade_to_black();
+                }
             }
             catch( Renderer.RenderError e ) {
                 GLib.printerr("The pdf page %d could not be rendered: %s\n", current_slide_number, e.message);
@@ -468,6 +510,7 @@ namespace pdfpc.Window {
         public void set_cache_observer(CacheStatus observer) {
             observer.monitor_view(this.current_view);
             observer.monitor_view(this.next_view);
+            observer.monitor_view(this.final_view);
 
             observer.update_progress.connect(this.prerender_progress.set_fraction);
             observer.update_complete.connect(this.prerender_finished);
