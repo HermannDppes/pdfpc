@@ -120,7 +120,7 @@ namespace pdfpc.Window {
         /**
          * Width of future area
          **/
-        protected int next_allocated_width;
+        protected int future_allocated_width;
 
         /**
          * Base constructor instantiating a new presenter window
@@ -173,13 +173,13 @@ namespace pdfpc.Window {
 
             // do not allocate negative width (in case of current_allocated_width == this.screen_geometry.width)
             // this happens, when the user set -u 100
-            int next_allocated_width = (int)Math.fmax(this.screen_geometry.width - current_allocated_width - 4, 0);
-            this.next_allocated_width = next_allocated_width;
+            int future_allocated_width = (int)Math.fmax(this.screen_geometry.width - current_allocated_width - 4, 0);
+            this.future_allocated_width = future_allocated_width;
             // We leave a bit of margin between the two views
             Gdk.Rectangle next_scale_rect;
             this.next_view = new View.Pdf.from_metadata(
                 metadata,
-                next_allocated_width,
+                future_allocated_width,
                 (int) Math.floor(Options.next_height * bottom_position / (double)100 ),
                 Metadata.Area.CONTENT,
                 true,
@@ -312,12 +312,12 @@ namespace pdfpc.Window {
 
             slide_views.pack_start(current_view_and_stricts, true, true, 0);
 
-            var nextViewWithNotes = new Gtk.Box(Gtk.Orientation.VERTICAL, 0);
-            nextViewWithNotes.set_size_request(this.next_allocated_width, -1);
+            var futureViews = new Gtk.Box(Gtk.Orientation.VERTICAL, 0);
+            futureViews.set_size_request(this.future_allocated_width, -1);
             this.next_view.halign = Gtk.Align.CENTER;
             this.next_view.valign = Gtk.Align.CENTER;
-            nextViewWithNotes.pack_start(next_view, false, false, 0);
-            slide_views.pack_start(nextViewWithNotes, true, true, 0);
+            futureViews.pack_start(next_view, false, false, 0);
+            slide_views.pack_start(futureViews, true, true, 0);
 
             this.slide_stack = new Gtk.Stack();
             this.slide_stack.add_named(slide_views, "slides");
