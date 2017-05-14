@@ -103,11 +103,6 @@ namespace pdfpc.Window {
         protected Gtk.Image loaded_icon;
 
         /**
-         * Text box for displaying notes for the slides
-         */
-        protected Gtk.TextView notes_view;
-
-        /**
          * The overview of slides
          */
         protected Overview overview = null;
@@ -123,7 +118,7 @@ namespace pdfpc.Window {
         protected Metadata.Pdf metadata;
 
         /**
-         * Width of next/notes area
+         * Width of future area
          **/
         protected int next_allocated_width;
 
@@ -140,7 +135,6 @@ namespace pdfpc.Window {
 
             this.presentation_controller = presentation_controller;
             this.presentation_controller.update_request.connect(this.update);
-            this.presentation_controller.edit_note_request.connect(this.edit_note);
             this.presentation_controller.ask_goto_page_request.connect(this.ask_goto_page);
             this.presentation_controller.show_overview_request.connect(this.show_overview);
             this.presentation_controller.hide_overview_request.connect(this.hide_overview);
@@ -217,22 +211,6 @@ namespace pdfpc.Window {
                 this.gdk_scale,
                 out next_scale_rect
             );
-
-            // TextView for notes in the slides
-            this.notes_view = new Gtk.TextView();
-            this.notes_view.name = "notesView";
-            this.notes_view.set_size_request(next_allocated_width, -1);
-            this.notes_view.editable = false;
-            this.notes_view.cursor_visible = false;
-            this.notes_view.wrap_mode = Gtk.WrapMode.WORD;
-            this.notes_view.buffer.text = "";
-            this.notes_view.key_press_event.connect(this.on_key_press_notes_view);
-            if (this.metadata.font_size >= 0) {
-                Pango.FontDescription font_desc = get_notes_font_description();
-
-                font_desc.set_size(this.metadata.font_size);
-                this.notes_view.override_font(font_desc);
-            }
 
             // The countdown timer is centered in the 90% bottom part of the screen
             this.timer = this.presentation_controller.getTimer();
@@ -339,11 +317,6 @@ namespace pdfpc.Window {
             this.next_view.halign = Gtk.Align.CENTER;
             this.next_view.valign = Gtk.Align.CENTER;
             nextViewWithNotes.pack_start(next_view, false, false, 0);
-            var notes_sw = new Gtk.ScrolledWindow(null, null);
-            notes_sw.set_size_request(this.next_allocated_width, -1);
-            notes_sw.add(this.notes_view);
-            notes_sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC);
-            nextViewWithNotes.pack_start(notes_sw, true, true, 5);
             slide_views.pack_start(nextViewWithNotes, true, true, 0);
 
             this.slide_stack = new Gtk.Stack();
@@ -459,7 +432,6 @@ namespace pdfpc.Window {
                 Process.exit(1);
             }
             this.update_slide_count();
-            this.update_note();
             if (this.timer.is_paused())
                 this.pause_icon.show();
             else
@@ -490,7 +462,6 @@ namespace pdfpc.Window {
             }
 
             this.update_slide_count();
-            this.update_note();
             this.blank_icon.hide();
         }
 
@@ -523,41 +494,6 @@ namespace pdfpc.Window {
             } else {
                 return false;
             }
-        }
-
-        /**
-         * Edit a note. Basically give focus to notes_view
-         */
-        public void edit_note() {
-            this.notes_view.editable = true;
-            this.notes_view.cursor_visible = true;
-            this.notes_view.grab_focus();
-            this.presentation_controller.set_ignore_input_events(true);
-        }
-
-        /**
-         * Handle key presses when editing a note
-         */
-        protected bool on_key_press_notes_view(Gtk.Widget source, Gdk.EventKey key) {
-            if (key.keyval == Gdk.Key.Escape) { /* Escape */
-                this.notes_view.editable = false;
-                this.notes_view.cursor_visible = false;
-                this.metadata.get_notes().set_note(this.notes_view.buffer.text,
-                    this.presentation_controller.current_user_slide_number);
-                this.presentation_controller.set_ignore_input_events(false);
-                return true;
-            } else {
-                return false;
-            }
-        }
-
-        /**
-         * Update the text of the current note
-         */
-        protected void update_note() {
-            string this_note = this.metadata.get_notes().get_note_for_slide(
-                this.presentation_controller.current_user_slide_number);
-            this.notes_view.buffer.text = this_note;
         }
 
         public void show_overview() {
@@ -596,32 +532,20 @@ namespace pdfpc.Window {
          * Increase font sizes for Widgets
          */
         public void increase_font_size() {
-            Pango.FontDescription font_desc = get_notes_font_description();
+            int old_font_size = this.metadata.font_size;
 
-            int font_size = (int)(font_desc.get_size()*1.1);
-            font_desc.set_size(font_size);
+            int font_size = (int)(old_font_size*1.1);
             this.metadata.font_size = font_size;
-            this.notes_view.override_font(font_desc);
         }
 
         /**
          * Decrease font sizes for Widgets
          */
         public void decrease_font_size() {
-            Pango.FontDescription font_desc = get_notes_font_description();
+            int old_font_size = this.metadata.font_size;
 
-            int font_size = (int)(font_desc.get_size()/1.1);
-            font_desc.set_size(font_size);
+            int font_size = (int)(old_font_size/1.1);
             this.metadata.font_size = font_size;
-            this.notes_view.override_font(font_desc);
-        }
-
-        private Pango.FontDescription get_notes_font_description() {
-            Gtk.StyleContext style_context = this.notes_view.get_style_context();
-            Pango.FontDescription font_desc;
-            style_context.get(style_context.get_state(), "font", out font_desc, null);
-
-            return font_desc;
         }
     }
 }
