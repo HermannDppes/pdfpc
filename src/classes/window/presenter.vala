@@ -60,12 +60,6 @@ namespace pdfpc.Window {
         protected View.Pdf next_view;
 
         /**
-         * Small views for (non-user) next slides
-         */
-        protected View.Pdf strict_next_view;
-        protected View.Pdf strict_prev_view;
-
-        /**
          * Timer for the presenation
          */
         protected TimerLabel? timer;
@@ -189,29 +183,6 @@ namespace pdfpc.Window {
                 out next_scale_rect
             );
 
-            this.strict_next_view = new View.Pdf.from_metadata(
-                metadata,
-                (int) Math.floor(0.5 * current_allocated_width),
-                (int) (Options.disable_auto_grouping ? 1 : (Math.floor(0.19 * bottom_position) - 2)),
-                Metadata.Area.CONTENT,
-                true,
-                false,
-                this.presentation_controller,
-                this.gdk_scale,
-                out next_scale_rect
-            );
-            this.strict_prev_view = new View.Pdf.from_metadata(
-                metadata,
-                (int) Math.floor(0.5 * current_allocated_width),
-                (int) (Options.disable_auto_grouping ? 1 : (Math.floor(0.19 * bottom_position) - 2)),
-                Metadata.Area.CONTENT,
-                true,
-                false,
-                this.presentation_controller,
-                this.gdk_scale,
-                out next_scale_rect
-            );
-
             // The countdown timer is centered in the 90% bottom part of the screen
             this.timer = this.presentation_controller.getTimer();
             this.timer.name = "timer";
@@ -291,26 +262,16 @@ namespace pdfpc.Window {
             if (!Options.disable_caching) {
                 this.current_view.get_renderer().cache = Renderer.Cache.create(metadata);
                 this.next_view.get_renderer().cache = Renderer.Cache.create(metadata);
-                this.strict_next_view.get_renderer().cache = Renderer.Cache.create(metadata);
-                this.strict_prev_view.get_renderer().cache = Renderer.Cache.create(metadata);
             }
 
             Gtk.Box slide_views = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 4);
-
-            var strict_views = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
-            strict_views.pack_start(this.strict_prev_view, false, false, 0);
-            strict_views.pack_end(this.strict_next_view, false, false, 0);
 
             this.current_view.halign = Gtk.Align.CENTER;
             this.current_view.valign = Gtk.Align.CENTER;
 
             fixed_layout.put(current_view, 0, 0);
 
-            var current_view_and_stricts = new Gtk.Box(Gtk.Orientation.VERTICAL, 0);
-            current_view_and_stricts.pack_start(fixed_layout, false, false, 0);
-            current_view_and_stricts.pack_start(strict_views, false, false, 0);
-
-            slide_views.pack_start(current_view_and_stricts, true, true, 0);
+            slide_views.pack_start(fixed_layout, true, true, 0);
 
             var futureViews = new Gtk.Box(Gtk.Orientation.VERTICAL, 0);
             futureViews.set_size_request(this.future_allocated_width, -1);
@@ -416,16 +377,6 @@ namespace pdfpc.Window {
                 this.current_view.display(current_slide_number);
                 this.next_view.display(this.metadata.user_slide_to_real_slide(
                     current_user_slide_number + 1));
-                if (this.presentation_controller.skip_next()) {
-                    this.strict_next_view.display(current_slide_number + 1, true);
-                } else {
-                    this.strict_next_view.fade_to_black();
-                }
-                if (this.presentation_controller.skip_previous()) {
-                    this.strict_prev_view.display(current_slide_number - 1, true);
-                } else {
-                    this.strict_prev_view.fade_to_black();
-                }
             }
             catch( Renderer.RenderError e ) {
                 GLib.printerr("The pdf page %d could not be rendered: %s\n", current_slide_number, e.message);
