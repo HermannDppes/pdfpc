@@ -416,6 +416,7 @@ namespace pdfpc.Window {
                     this.final_view.display(
                         this.metadata.user_slide_to_real_slide(
                             current_user_slide_number));
+                    this.final_view.redraw();
                 } else {
                     this.final_view.fade_to_black();
                 }
