@@ -422,8 +422,11 @@ namespace pdfpc.Window {
                     this.final_view.fade_to_black();
                 }
             }
-            catch( Renderer.RenderError e ) {
-                GLib.printerr("The pdf page %d could not be rendered: %s\n", current_slide_number, e.message);
+            catch (Renderer.RenderError e) {
+                GLib.printerr("The pdf page %d could not be rendered: %s\n",
+                    current_slide_number,
+                    e.message
+		);
                 Process.exit(1);
             }
             this.update_slide_count();
