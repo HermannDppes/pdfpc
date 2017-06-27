@@ -30,7 +30,7 @@
 
 [DBus (name = "org.freedesktop.ScreenSaver")]
 public interface ScreenSaver : Object {
-    public abstract uint32 inhibit(string application_name, string reason) throws IOError;
+    public abstract async uint32 inhibit(string application_name, string reason) throws IOError;
     public abstract void un_inhibit(uint32 cookie) throws IOError;
 }
 
@@ -198,6 +198,11 @@ namespace pdfpc {
         private Gee.ArrayQueue<int> history;
 
         /**
+         * Progress tracking for user slides
+         */
+        protected int[] user_slide_progress;
+
+        /**
          * Timer for the presentation. It should only be displayed on one view.
          * We hope the controllables behave accordingly.
          */
@@ -250,6 +255,7 @@ namespace pdfpc {
             this.controllables = new Gee.ArrayList<Controllable>();
 
             this.history = new Gee.ArrayQueue<int>();
+            this.user_slide_progress = new int[metadata.get_user_slide_count()];
 
             // Calculate the countdown to display until the presentation has to
             // start
@@ -276,11 +282,21 @@ namespace pdfpc {
             this.add_actions();
 
             try {
-                this.screensaver = Bus.get_proxy_sync(BusType.SESSION, "org.freedesktop.ScreenSaver",
-                    "/org/freedesktop/ScreenSaver");
-                this.screensaver_cookie = this.screensaver.inhibit("pdfpc",
-                    "Showing a presentation");
-                GLib.print("Screensaver inhibited\n");
+                Bus.get_proxy.begin<ScreenSaver>(BusType.SESSION, "org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver", 0, null, (obj, res) => {
+                    try {
+                        this.screensaver = Bus.get_proxy.end(res);
+                        this.screensaver.inhibit.begin("pdfpc", "Showing a presentation", (obj, res) => {
+                            try {
+                                this.screensaver_cookie = this.screensaver.inhibit.end(res);
+                                GLib.print("Screensaver inhibited\n");
+                            } catch (Error error) {
+                                // pass
+                            }
+                        });
+                    } catch (Error error) {
+                        // pass
+                    }
+                });
             } catch (Error error) {
                 // pass
             }
@@ -311,9 +327,6 @@ namespace pdfpc {
             presentation_allocation = a;
             presentation_surface = new Gtk.DrawingArea();
             presentation_surface.set_size_request(a.width, a.height);
-            var transparent = Gdk.RGBA ();
-            transparent.alpha=0;
-            this.presentation_surface.override_background_color(Gtk.StateFlags.NORMAL, transparent);
             this.presentation_surface.draw.connect ((context) => {
                     draw_pointer(context, presentation_allocation);
                     return true;
@@ -325,9 +338,6 @@ namespace pdfpc {
             presenter_allocation = a;
             presenter_surface = new Gtk.DrawingArea();
             presenter_surface.set_size_request(a.width, a.height);
-            var transparent = Gdk.RGBA ();
-            transparent.alpha=0;
-            this.presenter_surface.override_background_color(Gtk.StateFlags.NORMAL, transparent);
             this.presenter_surface.draw.connect ((context) => {
                     draw_pointer(context, presenter_allocation);
                     return true;
@@ -475,6 +485,8 @@ namespace pdfpc {
             add_action("prev", this.previous_page);
             add_action("prev10", this.back10);
             add_action("prevOverlay", this.previous_user_page);
+            add_action("prevSeen", this.previous_seen);
+            add_action("nextUnseen", this.next_unseen);
 
             add_action("goto", this.controllables_ask_goto_page);
             add_action("gotoFirst", this.goto_first);
@@ -760,6 +772,9 @@ namespace pdfpc {
             this.current_slide_number = page_number;
             this.current_user_slide_number = this.metadata.real_slide_to_user_slide(
                 this.current_slide_number);
+            if(this.current_slide_number > this.user_slide_progress[this.current_user_slide_number]) {
+                this.user_slide_progress[this.current_user_slide_number] = this.current_slide_number;
+            }
             this.controllables_update();
 
             if (start_timer) {
@@ -847,6 +862,9 @@ namespace pdfpc {
             } else if (this.black_on_end && !this.faded_to_black) {
                 this.fade_to_black();
             }
+            if(this.current_slide_number > this.user_slide_progress[this.current_user_slide_number]) {
+                this.user_slide_progress[this.current_user_slide_number] = this.current_slide_number;
+            }
         }
 
         /**
@@ -879,6 +897,43 @@ namespace pdfpc {
                 }
                 this.controllables_update();
             }
+
+            if(this.current_slide_number > this.user_slide_progress[this.current_user_slide_number]) {
+                this.user_slide_progress[this.current_user_slide_number] = this.current_slide_number;
+            }
+        }
+
+        /**
+         * Go to next real slide of the current user slide if there is one
+         * otherwise go to largest already seen real slide on next user slide
+         */
+        public void next_unseen() {
+            this.timer.start();
+
+            if (!this.frozen) {
+                this.faded_to_black = false;
+            }
+
+            if(this.current_slide_number == this.n_slides - 1) {
+                return;
+            }
+
+            int next_slide = this.current_slide_number + 1;
+            if(next_slide < this.n_slides - 1) {
+                int user_slide_at_next_slide = this.metadata.real_slide_to_user_slide(next_slide);
+                if(this.user_slide_progress[user_slide_at_next_slide] != 0 &&
+                        this.user_slide_progress[user_slide_at_next_slide] >= next_slide) {
+                    next_slide = this.user_slide_progress[user_slide_at_next_slide];
+                }
+            }
+
+            this.current_slide_number = next_slide;
+            this.current_user_slide_number = this.metadata.real_slide_to_user_slide(this.current_slide_number);
+            if(this.current_slide_number > this.user_slide_progress[this.current_user_slide_number]) {
+                this.user_slide_progress[this.current_user_slide_number] = this.current_slide_number;
+            }
+
+            this.controllables_update();
         }
 
         /**
@@ -906,6 +961,10 @@ namespace pdfpc {
                 }
                 this.controllables_update();
             }
+
+            if(this.current_slide_number > this.user_slide_progress[this.current_user_slide_number]) {
+                this.user_slide_progress[this.current_user_slide_number] = this.current_slide_number;
+            }
         }
 
         /**
@@ -922,6 +981,10 @@ namespace pdfpc {
                     this.faded_to_black = false;
                 }
                 this.controllables_update();
+
+                if(this.current_slide_number > this.user_slide_progress[this.current_user_slide_number]) {
+                    this.user_slide_progress[this.current_user_slide_number] = this.current_slide_number;
+                }
             }
         }
 
@@ -941,6 +1004,29 @@ namespace pdfpc {
             if (!this.frozen) {
                 this.faded_to_black = false;
             }
+            this.controllables_update();
+
+            if(this.current_slide_number > this.user_slide_progress[this.current_user_slide_number]) {
+                this.user_slide_progress[this.current_user_slide_number] = this.current_slide_number;
+            }
+        }
+
+        /**
+         * Go to the largest already seen real slide on previous user slide
+         */
+        public void previous_seen() {
+            this.timer.start();
+
+            if (!this.frozen) {
+                this.faded_to_black = false;
+            }
+
+            if(this.current_slide_number == 0) {
+                return;
+            }
+            this.current_slide_number = this.user_slide_progress[this.current_user_slide_number-1];
+            this.current_user_slide_number = this.metadata.real_slide_to_user_slide(this.current_slide_number);
+
             this.controllables_update();
         }
 
