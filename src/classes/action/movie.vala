@@ -265,6 +265,9 @@ namespace pdfpc {
                 uri = filename_to_uri(file, controller.get_pdf_fname());
                 temp = false;
                 noprogress = !movie.show_controls();
+                #if NEW_POPPLER
+                loop = movie.get_play_mode() == Poppler.MoviePlayMode.REPEAT;
+                #endif
                 break;
 
             default:
@@ -295,28 +298,45 @@ namespace pdfpc {
                     break;
                 }
                 Gst.Element sink;
-                // if the gstreamer OpenGL sink is installed (in gstreamer-plugins-bad), use it
-                // as it fixes video issues (cf pdfpc/pdfpc#197). Otherwise, fallback on
-                // default xvimagesink.
-                Gst.ElementFactory glimagesinkFactory = Gst.ElementFactory.find("glimagesink");
-                if(glimagesinkFactory != null) {
-                    sink = glimagesinkFactory.create(@"sink$n");
-                } else {
-                    GLib.printerr("gstreamer's OpenGL plugin glimagesink not available. Using xvimagesink instead.\n");
-                    sink = Gst.ElementFactory.make("xvimagesink", @"sink$n");
+
+                switch(Options.gstreamer_pipeline) {
+                    case Options.GstreamerPipeline.XVIMAGESINK:
+                        sink = Gst.ElementFactory.make("xvimagesink", @"sink$n");
+                        break;
+                    case Options.GstreamerPipeline.GLIMAGESINK:
+                        sink = Gst.ElementFactory.make("glimagesink", @"sink$n");
+                        break;
+                    default:
+                        GLib.printerr("Invalid gstreamer-pipeline selected. Falling back to autovideosink.\n");
+                        sink = Gst.ElementFactory.make("autovideosink", @"sink$n");
+                        break;
                 }
+
                 Gst.Element queue = Gst.ElementFactory.make("queue", @"queue$n");
                 bin.add_many(queue,sink);
                 tee.link(queue);
                 Gst.Element ad_element = this.link_additional(n, queue, bin, rect);
                 ad_element.link(sink);
                 sink.set("force_aspect_ratio", false);
-
                 Gst.Video.Overlay xoverlay = (Gst.Video.Overlay) sink;
-                xoverlay.set_window_handle(xid);
+
+                if(Options.gstreamer_pipeline == Options.GstreamerPipeline.GLIMAGESINK) {
+                    var overlay_widget = this.controller.overlay_widget(n, this.area);
+                    if (overlay_widget.get_realized()) {
+                        xoverlay.set_window_handle((uint*)((Gdk.X11.Window) overlay_widget.get_window()).get_xid());
+                    }
+                    else {
+                        overlay_widget.realize.connect((event) => {
+                            xoverlay.set_window_handle((uint*)((Gdk.X11.Window) overlay_widget.get_window()).get_xid());
+                        });
+                    }
+                }
+                else if(Options.gstreamer_pipeline == Options.GstreamerPipeline.XVIMAGESINK) {
+                    xoverlay.set_window_handle(xid);
+                    xoverlay.set_render_rectangle(rect.x*gdk_scale, rect.y*gdk_scale,
+                                                  rect.width*gdk_scale, rect.height*gdk_scale);
+                }
                 xoverlay.handle_events(false);
-                xoverlay.set_render_rectangle(rect.x*gdk_scale, rect.y*gdk_scale,
-                                              rect.width*gdk_scale, rect.height*gdk_scale);
                 n++;
             }
 
@@ -517,40 +537,62 @@ namespace pdfpc {
          */
         protected override Gst.Element link_additional(int n, Gst.Element source, Gst.Bin bin,
                 Gdk.Rectangle rect) {
-            if (n != 0) {
-                return source;
-            }
-
-            this.rect = rect;
-
-            dynamic Gst.Element overlay;
-            Gst.Element adaptor2;
-            try {
-                Gst.Element scale = gst_element_make("videoscale", "scale");
-                Gst.Element rate = gst_element_make("videorate", "rate");
-                Gst.Element adaptor1 = gst_element_make("videoconvert", "adaptor1");
-                adaptor2 = gst_element_make("videoconvert", "adaptor2");
-                overlay = gst_element_make("cairooverlay", "overlay");
-                Gst.Caps caps = Gst.Caps.from_string(
-                    "video/x-raw," + // Same as cairooverlay; hope to minimize transformations
-                    "framerate=[25/1,2147483647/1]," + // At least 25 fps
-                    @"width=$(rect.width),height=$(rect.height)"
-                );
-                Gst.Element filter = gst_element_make("capsfilter", "filter");
-                filter.set("caps", caps);
-                bin.add_many(adaptor1, adaptor2, overlay, scale, rate, filter);
-                if (!source.link_many(rate, scale, adaptor1, filter, overlay, adaptor2)) {
-                    throw new PipelineError.Linking("Could not link pipeline.");
+            // setup overlay (video controls) for the presenter
+            if (n == 0) {
+                dynamic Gst.Element overlay;
+                Gst.Element adaptor2;
+                try {
+                    var scale = gst_element_make("videoscale", null);
+                    var rate = gst_element_make("videorate", null);
+                    var adaptor1 = gst_element_make("videoconvert", null);
+                    adaptor2 = gst_element_make("videoconvert", null);
+                    overlay = gst_element_make("cairooverlay", null);
+                    var caps = Gst.Caps.from_string(
+                        "video/x-raw," + // Same as cairooverlay; hope to minimize transformations
+                        "framerate=[25/1,2147483647/1]," + // At least 25 fps
+                        @"width=$(rect.width),height=$(rect.height)"
+                    );
+                    var filter = gst_element_make("capsfilter", null);
+                    filter.set("caps", caps);
+                    bin.add_many(adaptor1, adaptor2, overlay, scale, rate, filter);
+                    if (!source.link_many(rate, scale, adaptor1, filter, overlay, adaptor2)) {
+                        throw new PipelineError.Linking("Could not link pipeline.");
+                    }
+                } catch (PipelineError err) {
+                    GLib.printerr("Error creating control pipeline: %s\n", err.message);
+                    return source;
                 }
-            } catch (PipelineError err) {
-                GLib.printerr("Error creating control pipeline: %s\n", err.message);
-                return source;
+
+                this.rect = rect;
+                overlay.draw.connect(this.on_draw);
+                overlay.caps_changed.connect(this.on_prepare);
+
+                return adaptor2;
+            } else { // for the rest, set the proper resolution
+                Gst.Element adaptor2;
+                try {
+                    var scale = gst_element_make("videoscale", null);
+                    var rate = gst_element_make("videorate", null);
+                    var adaptor1 = gst_element_make("videoconvert", null);
+                    adaptor2 = gst_element_make("videoconvert", null);
+                    var caps = Gst.Caps.from_string(
+                        "video/x-raw," +
+                        "framerate=[25/1,2147483647/1]," + // At least 25 fps
+                        @"width=$(rect.width),height=$(rect.height)"
+                    );
+                    var filter = gst_element_make("capsfilter", null);
+                    filter.set("caps", caps);
+                    bin.add_many(adaptor1, adaptor2, scale, rate, filter);
+                    if (!source.link_many(rate, scale, adaptor1, filter, adaptor2)) {
+                        throw new PipelineError.Linking("Could not link pipeline.");
+                    }
+                } catch (PipelineError err) {
+                    GLib.printerr("Error creating control pipeline: %s\n", err.message);
+                    return source;
+                }
+
+                return adaptor2;
             }
-
-            overlay.draw.connect(this.on_draw);
-            overlay.caps_changed.connect(this.on_prepare);
-
-            return adaptor2;
         }
 
         /**
